@@ -51,7 +51,7 @@ def build_synth(qqq_close, tqqq_real):
 
 tqqq_full = build_synth(qqq, tqqq_real)
 
-# Use common date range — TLT starts 2002-07, so use from 2003 onwards
+# Use common date range - TLT starts 2002-07, so use from 2003 onwards
 common_start = pd.Timestamp("2003-07-30")
 qqq_c = qqq.loc[common_start:]
 tqqq_c = tqqq_full.loc[common_start:]
@@ -84,8 +84,8 @@ def metrics(eq):
 # Strategy 1: Vol-targeted TQQQ (scale leverage to hit target vol)
 def vol_targeted_tqqq(qqq_d, tqqq_d, target_vol=0.15, lookback=60, bond_d=None):
     """
-    每日用过去 60 日 TQQQ 已实现波动率调整仓位, 目标年化波动率 15%
-    多余现金放 TLT (如果提供)
+    Scale position daily using past 60-day TQQQ realized vol, target annualized vol 15%
+    Extra cash parked in TLT (if provided)
     """
     tret = tqqq_d.pct_change().fillna(0)
     realized_vol = tret.rolling(lookback).std() * np.sqrt(252)
@@ -111,7 +111,7 @@ def vol_targeted_tqqq(qqq_d, tqqq_d, target_vol=0.15, lookback=60, bond_d=None):
 
 # Strategy 2: TQQQ + TLT pair (fixed weights)
 def tqqq_tlt_pair(qqq_d, tqqq_d, tlt_d, tqqq_w=0.40, tlt_w=0.60, rebal=63):
-    """固定 40% TQQQ + 60% TLT, 季度 rebal"""
+    """Fixed 40% TQQQ + 60% TLT, quarterly rebalance"""
     t_ret = tqqq_d.pct_change().fillna(0)
     b_ret = tlt_d.pct_change().fillna(0)
     idx = qqq_d.index
@@ -138,7 +138,7 @@ def tqqq_tlt_pair(qqq_d, tqqq_d, tlt_d, tqqq_w=0.40, tlt_w=0.60, rebal=63):
 
 # Strategy 3: Rotation with portfolio-level trailing stop
 def rotation_stop_loss(qqq_d, tqqq_d, stop_pct=0.15):
-    """Rotation + 当账户从峰值回撤超 stop_pct 时强制空仓"""
+    """Rotation + force flat when account drawdown from peak exceeds stop_pct"""
     bull = get_bull(qqq_d, FAST, SLOW).astype(float)
     qpos_base = 1 - bull
     tpos_base = bull
@@ -154,9 +154,9 @@ def rotation_stop_loss(qqq_d, tqqq_d, stop_pct=0.15):
 
     for i in range(1, len(qqq_d.index)):
         if in_stopout:
-            # 空仓, 等待信号反转重新进入
+            # Flat, wait for signal reversal to re-enter
             current_ret = 0
-            if bull.iloc[i-1] == 1 and bull.iloc[i-2] == 0:  # 新的牛信号
+            if bull.iloc[i-1] == 1 and bull.iloc[i-2] == 0:  # new bull signal
                 in_stopout = False
         else:
             q = qpos_base.shift(1).iloc[i]
@@ -201,10 +201,10 @@ def rotation_scaled(qqq_d, tqqq_d, tlt_d, tqqq_max=0.50):
     """Rotation with max 50% TQQQ + 50% TLT throughout"""
     bull = get_bull(qqq_d, FAST, SLOW).astype(float)
     tpos = bull * tqqq_max
-    bpos = (1 - bull) * tqqq_max + (1 - tqqq_max)  # Always hold 50% TLT + bull→TQQQ for the other half
-    # simplify: bull → 50% TQQQ + 50% TLT; bear → 50% QQQ + 50% TLT (or cash)
+    bpos = (1 - bull) * tqqq_max + (1 - tqqq_max)  # Always hold 50% TLT + bull->TQQQ for the other half
+    # simplify: bull -> 50% TQQQ + 50% TLT; bear -> 50% QQQ + 50% TLT (or cash)
     # ACTUALLY simpler: 50% TQQQ when bull, 50% SPY when bear; always 50% TLT
-    # Let's do: bull → 50% TQQQ + 50% TLT; bear → 50% QQQ + 50% TLT
+    # Let's do: bull -> 50% TQQQ + 50% TLT; bear -> 50% QQQ + 50% TLT
     qpos = (1 - bull) * tqqq_max  # half in QQQ during bear
     tpos_f = bull * tqqq_max        # half in TQQQ during bull
     bpos = pd.Series(1 - tqqq_max, index=qqq_d.index)  # always 50% TLT
@@ -249,7 +249,7 @@ def dynamic_rotation_vol(qqq_d, tqqq_d, tlt_d, target_vol=0.18, lookback=60):
 
 # ============================================================
 print("\n" + "=" * 108)
-print("CANDIDATES: MDD < 20% WITH TQQQ UPSIDE — SINGLE-PATH 2003-2026")
+print("CANDIDATES: MDD < 20% WITH TQQQ UPSIDE - SINGLE-PATH 2003-2026")
 print("=" * 108)
 print(f"\n{'Strategy':<50} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Sortino':>9} {'Calmar':>8} {'Final':>10}")
 print("-" * 108)
@@ -258,7 +258,7 @@ strategies_eq = {}
 
 # Baseline
 from_test = {
-    "Rotation (fixed 5/200) — baseline": lambda: compute_base_rotation(qqq_c, tqqq_c),
+    "Rotation (fixed 5/200) - baseline": lambda: compute_base_rotation(qqq_c, tqqq_c),
     "Vol-target TQQQ (15%, TLT)": lambda: vol_targeted_tqqq(qqq_c, tqqq_c, 0.15, 60, tlt_c),
     "Vol-target TQQQ (10%, TLT)": lambda: vol_targeted_tqqq(qqq_c, tqqq_c, 0.10, 60, tlt_c),
     "40/60 TQQQ/TLT quarterly": lambda: tqqq_tlt_pair(qqq_c, tqqq_c, tlt_c, 0.40, 0.60, 63),
@@ -287,7 +287,7 @@ for name, fn in from_test.items():
         eq = fn()
         c, m, sh, ca, fv, so = metrics(eq)
         strategies_eq[name] = eq
-        flag = "✅" if m > -0.20 else "⚠️"
+        flag = "PASS" if m > -0.20 else "WARN"
         print(f"{name:<50} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {so:>9.3f} {ca:>8.3f} {fv:>9,.0f} {flag}")
     except Exception as e:
         print(f"{name:<50} ERROR: {e}")

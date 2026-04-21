@@ -1,8 +1,8 @@
 """
-精确匹配 moomoo 47% 试验:
-- 截图里看到 EMA5/EMA10/EMA20 在显示 → 可能不是 5/200 而是 5/20
-- 也可能是 same-day close fill (没 T+1 滞后)
-- 试 5/20, 5/10, 同日成交几个组合
+Precisely match moomoo 47% experiment:
+- Screenshot shows EMA5/EMA10/EMA20 displayed -> may not be 5/200 but 5/20
+- Could also be same-day close fill (no T+1 lag)
+- Try 5/20, 5/10, and several same-day-fill combinations
 """
 import yfinance as yf
 import pandas as pd
@@ -46,7 +46,7 @@ def metrics(equity, daily_ret):
 qqq = close["QQQ"]
 tqqq = close["TQQQ"]
 
-# 多组合扫描
+# Multi-combination scan
 combos = [
     ("EMA5/200 TQQQ T+1", tqqq, 5, 200, 1),
     ("EMA5/200 TQQQ same-day", tqqq, 5, 200, 0),
@@ -61,7 +61,7 @@ combos = [
     ("EMA50/200 TQQQ T+1", tqqq, 50, 200, 1),
 ]
 
-print(f"{'策略':<30} {'年化':>10} {'最大回撤':>12} {'夏普':>8} {'卡玛':>8} {'终值':>14} {'交易':>6}")
+print(f"{'Strategy':<30} {'CAGR':>10} {'Max DD':>12} {'Sharpe':>8} {'Calmar':>8} {'Final Value':>14} {'Trades':>6}")
 print("-" * 100)
 for name, sig_src, f, s, lag in combos:
     eq, ret, b, sn = backtest(sig_src, tqqq, f, s, lag, name)
@@ -70,4 +70,4 @@ for name, sig_src, f, s, lag in combos:
     print(f"{name:<30} {cagr*100:>9.2f}% {dd*100:>11.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f} {n_trades:>6}")
 
 print("-" * 100)
-print(f"{'moomoo 基准':<30} {47.08:>9.2f}% {-72.80:>11.2f}% {1.083:>8.3f} {0.647:>8.3f} {425895:>14,.0f} {53:>6}")
+print(f"{'moomoo benchmark':<30} {47.08:>9.2f}% {-72.80:>11.2f}% {1.083:>8.3f} {0.647:>8.3f} {425895:>14,.0f} {53:>6}")

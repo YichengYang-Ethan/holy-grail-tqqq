@@ -1,9 +1,9 @@
 """
-代码逻辑严格验证：
-1. 用 OPEN 价格做执行 (信号 close[T] → buy/sell open[T+1]) — 无 look-ahead
-2. 用 CLOSE 价格做执行 (信号 close[T] → buy/sell close[T+1]) — 无 look-ahead
-3. 加入手续费 + 滑点
-4. 验证 EMA 计算与 cross 检测
+Strict code logic verification:
+1. Execute at OPEN price (signal close[T] -> buy/sell open[T+1]) - no look-ahead
+2. Execute at CLOSE price (signal close[T] -> buy/sell close[T+1]) - no look-ahead
+3. Include commission + slippage
+4. Verify EMA computation and cross detection
 """
 import yfinance as yf
 import pandas as pd
@@ -14,17 +14,17 @@ END = "2026-01-17"
 INIT_CASH = 10_000.0
 FAST, SLOW = 5, 200
 
-# 拉数据 - 同时拿 Open 和 Close
+# Pull data - fetch both Open and Close
 data = yf.download(["QQQ", "TQQQ"], start=START, end=END, auto_adjust=True, progress=False)
 opens = data["Open"].dropna()
 closes = data["Close"].dropna()
 
-# 对齐
+# Align
 idx = opens.index.intersection(closes.index)
 opens = opens.loc[idx]
 closes = closes.loc[idx]
 
-print(f"数据范围: {idx[0].date()} ~ {idx[-1].date()}, {len(idx)} 个交易日")
+print(f"Data range: {idx[0].date()} ~ {idx[-1].date()}, {len(idx)} trading days")
 print()
 
 def ema(s, n):
@@ -35,24 +35,24 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
                           fee_bps=2.5, slip_bps=5.0, exec_lag_days=1,
                           label=""):
     """
-    严格 event-driven backtest, 无 look-ahead bias.
+    Strict event-driven backtest, no look-ahead bias.
 
-    - signal_src: 用什么价格序列算 EMA (close)
-    - exec_price_src: 用什么价格成交 (open 或 close)
-    - exec_lag_days: 信号 → 成交的延迟 (1 = 次日)
-    - fee_bps: 单边手续费 (基点, 1bp = 0.01%)
-    - slip_bps: 滑点 (基点)
+    - signal_src: which price series to compute EMA on (close)
+    - exec_price_src: which price to execute at (open or close)
+    - exec_lag_days: delay from signal to execution (1 = next day)
+    - fee_bps: one-sided commission (basis points, 1bp = 0.01%)
+    - slip_bps: slippage (basis points)
     """
     ema_f = ema(signal_src, fast)
     ema_s = ema(signal_src, slow)
     sig = (ema_f > ema_s).astype(int)
-    sig.iloc[:slow] = 0  # 强制 warm-up 期间无信号
+    sig.iloc[:slow] = 0  # force no signal during warm-up
 
-    # 信号 cross 事件（仅在 cross 当天有变化）
-    sig_change = sig.diff().fillna(0)  # +1 = 上穿, -1 = 下穿
+    # Signal cross events (only change on the cross day)
+    sig_change = sig.diff().fillna(0)  # +1 = cross up, -1 = cross down
     cross_dates = sig_change[sig_change != 0].index
 
-    # 模拟逐日 equity
+    # Simulate daily equity
     cash = INIT_CASH
     shares = 0.0
     equity_curve = pd.Series(index=idx, dtype=float)
@@ -65,15 +65,15 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
     sig_change_dict = sig_change.to_dict()
 
     for i, t in enumerate(idx):
-        # 检查 exec_lag_days 之前的信号
+        # Check the signal exec_lag_days prior
         target_idx = i - exec_lag_days
         if target_idx >= 0:
             sig_t = idx[target_idx]
             change = sig_change_dict.get(sig_t, 0)
-            if change == 1 and shares == 0:  # 上穿，全仓买
+            if change == 1 and shares == 0:  # cross up, full buy
                 px = exec_price_src.loc[t]
                 px_with_slip = float(px) * (1 + slip_bps / 10000)
-                # 用全部现金买入
+                # Buy with all cash
                 shares_can_buy = cash / px_with_slip
                 cost = shares_can_buy * px_with_slip
                 fee = cost * fee_bps / 10000
@@ -84,7 +84,7 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
                 shares = shares_can_buy
                 n_buy += 1
                 last_action = ("BUY", t, px_with_slip, shares)
-            elif change == -1 and shares > 0:  # 下穿，全仓卖
+            elif change == -1 and shares > 0:  # cross down, full sell
                 px = exec_price_src.loc[t]
                 px_with_slip = float(px) * (1 - slip_bps / 10000)
                 proceeds = shares * px_with_slip
@@ -97,15 +97,15 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
                 n_sell += 1
                 last_action = ("SELL", t, px_with_slip, 0)
 
-        # 当日权益 = 现金 + 持仓 × 当日收盘价
+        # Daily equity = cash + position * day's closing price
         eq = cash + shares * float(closes.loc[t]["TQQQ" if "TQQQ" in str(exec_price_src.name) else "TQQQ"])
         equity_curve.loc[t] = eq
 
-    # 强制最后一天的权益用 TQQQ close
+    # Force last day equity to use TQQQ close
     for i, t in enumerate(idx):
         equity_curve.loc[t] = cash if shares == 0 else cash + shares * float(closes["TQQQ"].loc[t])
 
-    # 重算 equity (修正)
+    # Recompute equity (correction)
     cash = INIT_CASH
     shares = 0.0
     equity_curve = pd.Series(index=idx, dtype=float)
@@ -144,7 +144,7 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
         eq = cash + shares * float(closes["TQQQ"].loc[t])
         equity_curve.loc[t] = eq
 
-    # 计算指标
+    # Compute metrics
     daily_ret = equity_curve.pct_change().fillna(0)
     years = (equity_curve.index[-1] - equity_curve.index[0]).days / 365.25
     cagr = (equity_curve.iloc[-1] / equity_curve.iloc[0]) ** (1/years) - 1
@@ -167,20 +167,20 @@ def event_driven_backtest(signal_src, exec_price_src, fast, slow,
 
 
 print("=" * 100)
-print("严格 event-driven 回测（无 look-ahead）+ 手续费 2.5bp + 滑点 5bp")
+print("Strict event-driven backtest (no look-ahead) + commission 2.5bp + slippage 5bp")
 print("=" * 100)
 
 scenarios = [
     # (label, signal_src, exec_price, exec_lag)
-    ("EMA5/200 TQQQ-sig → fill open[T+1]",  closes["TQQQ"], opens["TQQQ"], 1),
-    ("EMA5/200 TQQQ-sig → fill close[T+1]", closes["TQQQ"], closes["TQQQ"], 1),
-    ("EMA5/200 QQQ-sig  → fill open[T+1]",  closes["QQQ"],  opens["TQQQ"], 1),
-    ("EMA5/200 QQQ-sig  → fill close[T+1]", closes["QQQ"],  closes["TQQQ"], 1),
-    # 不诚实的对照组：信号 = close[T], 也假装在 close[T] 当日成交
-    ("[作弊] EMA5/200 TQQQ same-day close",  closes["TQQQ"], closes["TQQQ"], 0),
+    ("EMA5/200 TQQQ-sig -> fill open[T+1]",  closes["TQQQ"], opens["TQQQ"], 1),
+    ("EMA5/200 TQQQ-sig -> fill close[T+1]", closes["TQQQ"], closes["TQQQ"], 1),
+    ("EMA5/200 QQQ-sig  -> fill open[T+1]",  closes["QQQ"],  opens["TQQQ"], 1),
+    ("EMA5/200 QQQ-sig  -> fill close[T+1]", closes["QQQ"],  closes["TQQQ"], 1),
+    # Dishonest control: signal = close[T], pretend filled at close[T] same day
+    ("[cheating] EMA5/200 TQQQ same-day close",  closes["TQQQ"], closes["TQQQ"], 0),
 ]
 
-print(f"\n{'策略':<48} {'CAGR':>9} {'MDD':>9} {'夏普':>8} {'卡玛':>8} {'终值':>14} {'交易':>5}")
+print(f"\n{'Strategy':<48} {'CAGR':>9} {'MDD':>9} {'Sharpe':>8} {'Calmar':>8} {'Final Value':>14} {'Trades':>5}")
 print("-" * 110)
 results = []
 for label, sig_src, exec_px, lag in scenarios:
@@ -188,7 +188,7 @@ for label, sig_src, exec_px, lag in scenarios:
     results.append(r)
     print(f"{label:<48} {r['CAGR']*100:>8.2f}% {r['MDD']*100:>8.2f}% {r['Sharpe']:>8.3f} {r['Calmar']:>8.3f} {r['FinalValue']:>14,.0f} {r['NTrades']:>5}")
 
-# Buy & hold 对照
+# Buy & hold control
 def bh_metrics(price_series, label):
     eq = (price_series / price_series.iloc[0]) * INIT_CASH
     daily_ret = eq.pct_change().fillna(0)
@@ -200,19 +200,19 @@ def bh_metrics(price_series, label):
     return label, cagr, max_dd, sharpe, calmar, eq.iloc[-1]
 
 print()
-print("Buy & Hold 对照:")
+print("Buy & Hold control:")
 print("-" * 110)
 for label, c, m, s, ca, f in [bh_metrics(closes["TQQQ"], "TQQQ B&H"), bh_metrics(closes["QQQ"], "QQQ B&H")]:
     print(f"{label:<48} {c*100:>8.2f}% {m*100:>8.2f}% {s:>8.3f} {ca:>8.3f} {f:>14,.0f}     -")
 
 print()
-print("moomoo 截图基准:")
+print("moomoo screenshot benchmark:")
 print("-" * 110)
-print(f"{'moomoo (新建策略1)':<48} {47.08:>8.2f}% {-72.80:>8.2f}% {1.083:>8.3f} {0.647:>8.3f} {425895:>14,.0f}    53")
+print(f"{'moomoo (new strategy 1)':<48} {47.08:>8.2f}% {-72.80:>8.2f}% {1.083:>8.3f} {0.647:>8.3f} {425895:>14,.0f}    53")
 
 print()
 print("=" * 100)
-print("【手续费/滑点详情】")
+print("[Commission/Slippage Details]")
 print("=" * 100)
 for r in results:
-    print(f"{r['label']:<48} 手续费 ${r['Fees']:>9,.0f}  滑点 ${r['Slippage']:>9,.0f}")
+    print(f"{r['label']:<48} fees ${r['Fees']:>9,.0f}  slippage ${r['Slippage']:>9,.0f}")

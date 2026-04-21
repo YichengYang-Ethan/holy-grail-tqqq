@@ -1,6 +1,6 @@
 """
-纯 TQQQ 金字塔策略（无 QQQ）
-目标: 找到合理 / 不过拟合的 TQQQ + 现金金字塔, 击败 WF MA5/200 TQQQ rotation
+Pure TQQQ pyramid strategy (no QQQ)
+Goal: find a reasonable, non-overfitted TQQQ + cash pyramid that beats WF MA5/200 TQQQ rotation
 """
 import yfinance as yf
 import pandas as pd
@@ -10,7 +10,7 @@ START = "1999-03-10"
 END = "2026-04-18"
 INIT_CASH = 10_000.0
 
-print("[1/6] 数据准备 ...")
+print("[1/6] Data preparation ...")
 qqq = yf.download("QQQ", start=START, end=END, auto_adjust=True, progress=False)["Close"].squeeze()
 tqqq_real = yf.download("TQQQ", start="2010-02-11", end=END, auto_adjust=True, progress=False)["Close"].squeeze()
 
@@ -37,11 +37,11 @@ def build_synth(qqq_close, tqqq_real):
     return full.reindex(qqq_close.index).ffill()
 
 tqqq_full = build_synth(qqq, tqqq_real)
-print(f"  TQQQ {tqqq_full.index[0].date()} ~ {tqqq_full.index[-1].date()}, {len(tqqq_full)} 天")
+print(f"  TQQQ {tqqq_full.index[0].date()} ~ {tqqq_full.index[-1].date()}, {len(tqqq_full)} days")
 print()
 
 def backtest_tqqq_cash(tpos, tqqq, fee_bps=2.5, slip_bps=5.0):
-    """TQQQ + 现金。tpos = TQQQ 权重, 1-tpos = 现金"""
+    """TQQQ + cash. tpos = TQQQ weight, 1-tpos = cash"""
     tpos_lag = tpos.shift(1).fillna(0)
     tret = tqqq.pct_change().fillna(0)
     pos_change = tpos_lag.diff().abs().fillna(0)
@@ -61,7 +61,7 @@ def metrics(eq, ret):
     return cagr, mdd, sh, cal, eq.iloc[-1], so
 
 # ============================================================
-# 信号源: 牛/熊判断 (用 EMA 5/200 作为基础)
+# Signal source: bull/bear judgment (use EMA 5/200 as base)
 # ============================================================
 def get_bull_signal(qqq, fast=5, slow=200):
     ema_f = qqq.ewm(span=fast, adjust=False).mean()
@@ -71,17 +71,17 @@ def get_bull_signal(qqq, fast=5, slow=200):
     return bull
 
 # ============================================================
-# 金字塔策略生成函数
+# Pyramid strategy generator function
 # ============================================================
 def build_pure_tqqq_pyramid(qqq, tqqq, bull_signal, ma_period=200,
-                              bear_base_tqqq=0.0,  # 熊市基础 TQQQ 持仓
+                              bear_base_tqqq=0.0,  # base TQQQ exposure in bear market
                               levels=None,  # [(drawdown, deploy_fraction)]
-                              anchor="ma"):  # "ma" 或 "peak"
+                              anchor="ma"):  # "ma" or "peak"
     """
-    纯 TQQQ + 现金的金字塔策略
-    - bear_base_tqqq: 熊市初始 TQQQ 仓位 (0 = 全现金, 0.5 = 半仓)
-    - levels: 金字塔阶梯 [(跌幅, 累计部署比例)]
-    - anchor: "ma" 用 MA 偏离, "peak" 用最高点回撤
+    Pure TQQQ + cash pyramid strategy
+    - bear_base_tqqq: initial TQQQ exposure in bear market (0 = all cash, 0.5 = half)
+    - levels: pyramid steps [(drawdown, cumulative deploy fraction)]
+    - anchor: "ma" = deviation from MA, "peak" = drawdown from peak
     """
     if levels is None:
         levels = [(-0.10, 0.25), (-0.20, 0.50), (-0.30, 0.75), (-0.40, 1.00)]
@@ -103,7 +103,7 @@ def build_pure_tqqq_pyramid(qqq, tqqq, bull_signal, ma_period=200,
         if bull_signal.iloc[i]:
             tpos.iloc[i] = 1.0
         else:
-            # 熊市: 计算金字塔部署
+            # Bear: compute pyramid deployment
             dev = deviation.iloc[i]
             deploy = 0.0
             for thresh, frac in levels:
@@ -115,30 +115,30 @@ def build_pure_tqqq_pyramid(qqq, tqqq, bull_signal, ma_period=200,
     return tpos
 
 # ============================================================
-# 实验 1: 多种纯 TQQQ 金字塔配置 - 全样本
+# Experiment 1: multiple pure TQQQ pyramid configs - full sample
 # ============================================================
 print("=" * 100)
-print("【实验 1】纯 TQQQ + 现金金字塔配置扫描 — 全样本 1999-2026")
+print("[Experiment 1] Pure TQQQ + cash pyramid configuration scan - full sample 1999-2026")
 print("=" * 100)
 
 bull = get_bull_signal(qqq, 5, 200)
 
 configs = [
     # (name, base_tqqq, levels, anchor, ma_period)
-    ("T1 全现金/MA200锚 -10/-20/-30/-40 → 25/50/75/100", 0.0, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
-    ("T2 全现金/MA200锚 -5/-15/-25/-35 → 25/50/75/100",  0.0, [(-0.05,0.25),(-0.15,0.50),(-0.25,0.75),(-0.35,1.00)], "ma", 200),
-    ("T3 全现金/MA200锚 -15/-25/-35/-45 → 25/50/75/100", 0.0, [(-0.15,0.25),(-0.25,0.50),(-0.35,0.75),(-0.45,1.00)], "ma", 200),
-    ("T4 全现金/Peak锚 -10/-20/-30/-40 → 25/50/75/100",  0.0, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "peak", 200),
-    ("T5 全现金/Peak锚 -15/-30/-45/-60 → 25/50/75/100",  0.0, [(-0.15,0.25),(-0.30,0.50),(-0.45,0.75),(-0.60,1.00)], "peak", 200),
-    ("T6 半仓/MA200锚 -10/-20/-30/-40 → 25/50/75/100",   0.5, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
-    ("T7 30%基础/MA200锚 -10/-20/-30/-40",              0.3, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
-    ("T8 全现金/MA50锚 -5/-10/-15/-20",                  0.0, [(-0.05,0.25),(-0.10,0.50),(-0.15,0.75),(-0.20,1.00)], "ma", 50),
-    ("T9 全现金/MA200锚 多档 -5/-10/-20/-30/-40/-50",      0.0, [(-0.05,0.20),(-0.10,0.40),(-0.20,0.60),(-0.30,0.80),(-0.40,1.00)], "ma", 200),
-    ("T10 全现金/MA200锚 简单 -20/-40 → 50/100",          0.0, [(-0.20,0.50),(-0.40,1.00)], "ma", 200),
-    ("T11 全现金/MA200锚 极早 0/-10/-20/-30",             0.0, [(0.0,0.25),(-0.10,0.50),(-0.20,0.75),(-0.30,1.00)], "ma", 200),
+    ("T1 all-cash/MA200 anchor -10/-20/-30/-40 -> 25/50/75/100", 0.0, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
+    ("T2 all-cash/MA200 anchor -5/-15/-25/-35 -> 25/50/75/100",  0.0, [(-0.05,0.25),(-0.15,0.50),(-0.25,0.75),(-0.35,1.00)], "ma", 200),
+    ("T3 all-cash/MA200 anchor -15/-25/-35/-45 -> 25/50/75/100", 0.0, [(-0.15,0.25),(-0.25,0.50),(-0.35,0.75),(-0.45,1.00)], "ma", 200),
+    ("T4 all-cash/Peak anchor -10/-20/-30/-40 -> 25/50/75/100",  0.0, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "peak", 200),
+    ("T5 all-cash/Peak anchor -15/-30/-45/-60 -> 25/50/75/100",  0.0, [(-0.15,0.25),(-0.30,0.50),(-0.45,0.75),(-0.60,1.00)], "peak", 200),
+    ("T6 half/MA200 anchor -10/-20/-30/-40 -> 25/50/75/100",   0.5, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
+    ("T7 30% base/MA200 anchor -10/-20/-30/-40",              0.3, [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], "ma", 200),
+    ("T8 all-cash/MA50 anchor -5/-10/-15/-20",                  0.0, [(-0.05,0.25),(-0.10,0.50),(-0.15,0.75),(-0.20,1.00)], "ma", 50),
+    ("T9 all-cash/MA200 anchor multi-step -5/-10/-20/-30/-40/-50",      0.0, [(-0.05,0.20),(-0.10,0.40),(-0.20,0.60),(-0.30,0.80),(-0.40,1.00)], "ma", 200),
+    ("T10 all-cash/MA200 anchor simple -20/-40 -> 50/100",          0.0, [(-0.20,0.50),(-0.40,1.00)], "ma", 200),
+    ("T11 all-cash/MA200 anchor very-early 0/-10/-20/-30",             0.0, [(0.0,0.25),(-0.10,0.50),(-0.20,0.75),(-0.30,1.00)], "ma", 200),
 ]
 
-print(f"\n{'配置':<60} {'CAGR':>7} {'MDD':>9} {'Sharpe':>7} {'Sortino':>8} {'Calmar':>7} {'终值':>14}")
+print(f"\n{'Config':<60} {'CAGR':>7} {'MDD':>9} {'Sharpe':>7} {'Sortino':>8} {'Calmar':>7} {'Final Value':>14}")
 print("-" * 130)
 results_full = {}
 for name, base, levels, anchor, ma_p in configs:
@@ -148,8 +148,8 @@ for name, base, levels, anchor, ma_p in configs:
     results_full[name] = (c, m, sh, ca, fv, so)
     print(f"{name:<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
-# 基准: WF MA5/200 TQQQ rotation (cash 版本)
-print("\n基准对比:")
+# Baseline: WF MA5/200 TQQQ rotation (cash version)
+print("\nBaseline comparison:")
 print("-" * 130)
 
 def wf_tqqq_cash(qqq, tqqq, train_y=5, test_y=2):
@@ -187,31 +187,31 @@ def wf_tqqq_cash(qqq, tqqq, train_y=5, test_y=2):
     full_eq = (1 + full_ret).cumprod() * INIT_CASH
     return full_eq, full_ret
 
-# 单一参数 MA5/200 (无 WF) 全样本
+# Single-parameter MA5/200 (no WF) full sample
 tpos_basic = bull.astype(float)
 eq, ret, _ = backtest_tqqq_cash(tpos_basic, tqqq_full)
 c, m, sh, ca, fv, so = metrics(eq, ret)
-print(f"{'★ 基准 1: 静态 EMA5/200 TQQQ/cash':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
+print(f"{'Baseline 1: static EMA5/200 TQQQ/cash':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
 # B&H
 eq = (tqqq_full / tqqq_full.iloc[0]) * INIT_CASH
 ret = eq.pct_change().fillna(0)
 c, m, sh, ca, fv, so = metrics(eq, ret)
-print(f"{'★ 基准 2: TQQQ Buy & Hold':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
+print(f"{'Baseline 2: TQQQ Buy & Hold':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
 eq = (qqq / qqq.iloc[0]) * INIT_CASH
 ret = eq.pct_change().fillna(0)
 c, m, sh, ca, fv, so = metrics(eq, ret)
-print(f"{'★ 基准 3: QQQ Buy & Hold':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
+print(f"{'Baseline 3: QQQ Buy & Hold':<60} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
 print()
 print("=" * 100)
-print("【实验 2】Walk-Forward 纯 TQQQ + 金字塔（参数自适应）")
+print("[Experiment 2] Walk-Forward pure TQQQ + pyramid (adaptive params)")
 print("=" * 100)
 
 def wf_pure_tqqq_pyramid(qqq, tqqq, levels, base_tqqq=0.0, anchor="ma",
                          train_y=5, test_y=2):
-    """walk-forward: 只调 (fast, slow), 金字塔参数固定"""
+    """walk-forward: tune (fast, slow) only, pyramid params fixed"""
     fast_grid = [3, 5, 8, 10, 13]
     slow_grid = [50, 100, 150, 200, 250]
     all_returns = []
@@ -247,18 +247,18 @@ def wf_pure_tqqq_pyramid(qqq, tqqq, levels, base_tqqq=0.0, anchor="ma",
     full_eq = (1 + full_ret).cumprod() * INIT_CASH
     return full_eq, full_ret, chosen
 
-print("\n运行 WF 纯 TQQQ + 多种金字塔配置 (5y train + 2y test) ...")
+print("\nRunning WF pure TQQQ + multiple pyramid configs (5y train + 2y test) ...")
 wf_configs = [
-    ("WF-T1 全现金/MA200锚 -10/-20/-30/-40", [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.0, "ma"),
-    ("WF-T2 全现金/MA200锚 -5/-15/-25/-35",  [(-0.05,0.25),(-0.15,0.50),(-0.25,0.75),(-0.35,1.00)], 0.0, "ma"),
-    ("WF-T4 全现金/Peak锚 -10/-20/-30/-40",  [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.0, "peak"),
-    ("WF-T5 全现金/Peak锚 -15/-30/-45/-60",  [(-0.15,0.25),(-0.30,0.50),(-0.45,0.75),(-0.60,1.00)], 0.0, "peak"),
-    ("WF-T6 半仓/MA200锚 -10/-20/-30/-40",   [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.5, "ma"),
-    ("WF-T7 30%基础/MA200锚 -10/-20/-30/-40", [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.3, "ma"),
-    ("WF-T11 极早 0/-10/-20/-30",            [(0.0,0.25),(-0.10,0.50),(-0.20,0.75),(-0.30,1.00)], 0.0, "ma"),
+    ("WF-T1 all-cash/MA200 anchor -10/-20/-30/-40", [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.0, "ma"),
+    ("WF-T2 all-cash/MA200 anchor -5/-15/-25/-35",  [(-0.05,0.25),(-0.15,0.50),(-0.25,0.75),(-0.35,1.00)], 0.0, "ma"),
+    ("WF-T4 all-cash/Peak anchor -10/-20/-30/-40",  [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.0, "peak"),
+    ("WF-T5 all-cash/Peak anchor -15/-30/-45/-60",  [(-0.15,0.25),(-0.30,0.50),(-0.45,0.75),(-0.60,1.00)], 0.0, "peak"),
+    ("WF-T6 half/MA200 anchor -10/-20/-30/-40",   [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.5, "ma"),
+    ("WF-T7 30% base/MA200 anchor -10/-20/-30/-40", [(-0.10,0.25),(-0.20,0.50),(-0.30,0.75),(-0.40,1.00)], 0.3, "ma"),
+    ("WF-T11 very-early 0/-10/-20/-30",            [(0.0,0.25),(-0.10,0.50),(-0.20,0.75),(-0.30,1.00)], 0.0, "ma"),
 ]
 
-print(f"\n{'WF 配置':<58} {'CAGR':>7} {'MDD':>9} {'Sharpe':>7} {'Sortino':>8} {'Calmar':>7} {'终值':>14}")
+print(f"\n{'WF Config':<58} {'CAGR':>7} {'MDD':>9} {'Sharpe':>7} {'Sortino':>8} {'Calmar':>7} {'Final Value':>14}")
 print("-" * 130)
 wf_results = {}
 for name, levels, base, anchor in wf_configs:
@@ -267,14 +267,14 @@ for name, levels, base, anchor in wf_configs:
     wf_results[name] = (c, m, sh, ca, fv, so, eq, ret)
     print(f"{name:<58} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
-# 基准: WF cash 版 (无金字塔)
-print("\n--- 基准 ---")
+# Baseline: WF cash version (no pyramid)
+print("\n--- Baseline ---")
 print("-" * 130)
 eq, ret = wf_tqqq_cash(qqq, tqqq_full, 5, 2)
 c, m, sh, ca, fv, so = metrics(eq, ret)
-print(f"{'★ WF MA5/200 TQQQ/cash 纯轮换 (cash 版)':<58} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
+print(f"{'WF MA5/200 TQQQ/cash pure rotation (cash version)':<58} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
-# WF rotation (QQQ/TQQQ) 同期
+# WF rotation (QQQ/TQQQ) same period
 def wf_qqq_tqqq(qqq, tqqq_full, train_y=5, test_y=2):
     fast_grid = [3, 5, 8, 10, 13]
     slow_grid = [50, 100, 150, 200, 250]
@@ -290,7 +290,7 @@ def wf_qqq_tqqq(qqq, tqqq_full, train_y=5, test_y=2):
             for s in slow_grid:
                 if f >= s: continue
                 bull_t = get_bull_signal(qqq.loc[train_idx], f, s).astype(float)
-                # rotation: bull → TQQQ, bear → QQQ
+                # rotation: bull -> TQQQ, bear -> QQQ
                 qpos = (1 - bull_t)
                 tpos = bull_t
                 qret = qqq.loc[train_idx].pct_change().fillna(0)
@@ -319,13 +319,13 @@ def wf_qqq_tqqq(qqq, tqqq_full, train_y=5, test_y=2):
 
 eq, ret = wf_qqq_tqqq(qqq, tqqq_full, 5, 2)
 c, m, sh, ca, fv, so = metrics(eq, ret)
-print(f"{'★ WF QQQ/TQQQ 轮换 (前最佳, 含 QQQ)':<58} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
+print(f"{'WF QQQ/TQQQ rotation (prev best, includes QQQ)':<58} {c*100:>6.2f}% {m*100:>8.2f}% {sh:>7.3f} {so:>8.3f} {ca:>7.3f} {fv:>14,.0f}")
 
-# 同期 buy & hold
+# Same-period buy & hold
 test_period = ret.index
 tqqq_t = tqqq_full.loc[test_period]
 qqq_t = qqq.loc[test_period]
-for name, px in [("TQQQ B&H 同期", tqqq_t), ("QQQ B&H 同期", qqq_t)]:
+for name, px in [("TQQQ B&H same period", tqqq_t), ("QQQ B&H same period", qqq_t)]:
     eq = (px / px.iloc[0]) * INIT_CASH
     ret = eq.pct_change().fillna(0)
     c, m, sh, ca, fv, so = metrics(eq, ret)
@@ -333,36 +333,36 @@ for name, px in [("TQQQ B&H 同期", tqqq_t), ("QQQ B&H 同期", qqq_t)]:
 
 print()
 print("=" * 100)
-print("【冠军分析】纯 TQQQ 金字塔最佳 vs WF 轮换基准")
+print("[Champion analysis] Best pure TQQQ pyramid vs WF rotation baseline")
 print("=" * 100)
 
 best_calmar = max(wf_results.items(), key=lambda x: x[1][3])
 best_cagr = max(wf_results.items(), key=lambda x: x[1][0])
 
-print(f"\n最高 Calmar (纯 TQQQ): {best_calmar[0]}")
+print(f"\nHighest Calmar (pure TQQQ): {best_calmar[0]}")
 print(f"  CAGR {best_calmar[1][0]*100:.2f}%, MDD {best_calmar[1][1]*100:.2f}%, Calmar {best_calmar[1][3]:.3f}")
-print(f"\n最高 CAGR (纯 TQQQ):   {best_cagr[0]}")
+print(f"\nHighest CAGR (pure TQQQ):   {best_cagr[0]}")
 print(f"  CAGR {best_cagr[1][0]*100:.2f}%, MDD {best_cagr[1][1]*100:.2f}%, Calmar {best_cagr[1][3]:.3f}")
 
 print()
 print("=" * 100)
-print("【过拟合验证】1999-2010 严格样本外测试")
+print("[Overfitting check] Strict 1999-2010 out-of-sample test")
 print("=" * 100)
 
 oos_idx = qqq.index <= "2010-02-10"
-print(f"\n{'策略':<58} {'OOS CAGR':>10} {'OOS MDD':>10} {'OOS Calmar':>11}")
+print(f"\n{'Strategy':<58} {'OOS CAGR':>10} {'OOS MDD':>10} {'OOS Calmar':>11}")
 print("-" * 100)
 for name, levels, base, anchor in wf_configs:
     bull_oos = get_bull_signal(qqq[oos_idx], 5, 200)
     tpos = build_pure_tqqq_pyramid(qqq[oos_idx], tqqq_full[oos_idx], bull_oos, 200, base, levels, anchor)
     eq, ret, _ = backtest_tqqq_cash(tpos, tqqq_full[oos_idx])
     c, m, sh, ca, fv, so = metrics(eq, ret)
-    flag = "✅" if c > 0 else "❌"
+    flag = "YES" if c > 0 else "NO"
     print(f"{name:<58} {c*100:>9.2f}% {m*100:>9.2f}% {ca:>11.3f} {flag}")
 
 print()
 print("=" * 100)
-print("【Bootstrap】最优配置显著性")
+print("[Bootstrap] Best config significance")
 print("=" * 100)
 
 best_ret = best_calmar[1][7]
@@ -380,7 +380,7 @@ for _ in range(1000):
     if s.std() > 0: sharpes.append(s.mean() * 252 / (s.std() * np.sqrt(252)))
 cagrs, sharpes = np.array(cagrs), np.array(sharpes)
 print(f"\n{best_calmar[0]}:")
-print(f"  CAGR  中位数 {np.median(cagrs)*100:.2f}%, 95% CI [{np.percentile(cagrs, 2.5)*100:.2f}%, {np.percentile(cagrs, 97.5)*100:.2f}%]")
-print(f"  Sharpe 中位数 {np.median(sharpes):.3f}, 95% CI [{np.percentile(sharpes, 2.5):.3f}, {np.percentile(sharpes, 97.5):.3f}]")
-print(f"  CAGR > 0 概率: {(cagrs > 0).mean()*100:.1f}%")
-print(f"  CAGR > 20% 概率: {(cagrs > 0.20).mean()*100:.1f}%")
+print(f"  CAGR  median {np.median(cagrs)*100:.2f}%, 95% CI [{np.percentile(cagrs, 2.5)*100:.2f}%, {np.percentile(cagrs, 97.5)*100:.2f}%]")
+print(f"  Sharpe median {np.median(sharpes):.3f}, 95% CI [{np.percentile(sharpes, 2.5):.3f}, {np.percentile(sharpes, 97.5):.3f}]")
+print(f"  P(CAGR > 0): {(cagrs > 0).mean()*100:.1f}%")
+print(f"  P(CAGR > 20%): {(cagrs > 0.20).mean()*100:.1f}%")

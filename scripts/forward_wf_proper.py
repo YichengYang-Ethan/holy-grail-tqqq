@@ -1,13 +1,13 @@
 """
-因果正确的前向 walk-forward + Purged/Embargoed CV (López de Prado 2018)
+Causally correct forward walk-forward + Purged/Embargoed CV (Lopez de Prado 2018)
 
-之前的错误: 用 2010-2026 选参数, 测试 1999-2010 → 反因果
-正确做法: 1999 起步, 训练只用历史数据, 测试只看未来
+Previous mistake: used 2010-2026 to pick parameters, tested on 1999-2010 -> anti-causal
+Correct approach: start from 1999, training uses only historical data, testing only sees the future
 
-外加:
-- Purged CV: 训练/测试间留 embargo period 防 label leakage
+Additionally:
+- Purged CV: leave embargo period between train/test to prevent label leakage
 - Combinatorial Purged Cross-Validation (CPCV)
-- 全 1999-2026 一个完整 forward run
+- Full 1999-2026 single complete forward run
 """
 import yfinance as yf
 import pandas as pd
@@ -99,16 +99,16 @@ def metrics(eq, ret):
     return cagr, mdd, sh, cal, eq.iloc[-1], so
 
 # ============================================================
-# 因果正确的前向 walk-forward, 从 1999 开始
-# 每次训练只用过去数据, 测试是真实"未来"
+# Causally correct forward walk-forward, starting in 1999
+# Each train window uses only past data, test is truly "future"
 # ============================================================
 def forward_wf(qqq, tqqq, train_y, test_y, embargo_d, strategy_fn, search_grid):
     """
-    前向 WF + embargo:
-    - 1999-1999+train_y: 训练
-    - +embargo_d: 隔离期 (防止 label leakage)
-    - 测试 test_y 年
-    - 滚动前进
+    Forward WF + embargo:
+    - 1999 to 1999+train_y: train
+    - +embargo_d: isolation period (prevents label leakage)
+    - Test test_y years
+    - Roll forward
     """
     all_returns = []
     chosen = []
@@ -120,15 +120,15 @@ def forward_wf(qqq, tqqq, train_y, test_y, embargo_d, strategy_fn, search_grid):
     start_idx = train_d
     while start_idx + embargo_d + test_d <= len(qqq):
         train_end = start_idx
-        train_start = max(0, train_end - train_d)  # 滚动窗口
-        # train_start = 0  # 或膨胀窗口
+        train_start = max(0, train_end - train_d)  # rolling window
+        # train_start = 0  # or expanding window
 
         train_idx = qqq.index[train_start:train_end]
         test_start_idx = train_end + embargo_d  # embargo gap
         test_end_idx = min(test_start_idx + test_d, len(qqq))
         test_idx = qqq.index[test_start_idx:test_end_idx]
 
-        # 训练: 在 train 集上选最优参数
+        # Train: pick best params on train set
         best_cal = -999; best_p = None
         for p in search_grid:
             try:
@@ -143,8 +143,8 @@ def forward_wf(qqq, tqqq, train_y, test_y, embargo_d, strategy_fn, search_grid):
             start_idx += test_d
             continue
 
-        # 测试: 用 train 选出来的参数应用到 test 期
-        # 注意: EMA/cummax 需要 warm-up, 所以从 train_start 开始算, 只取 test 期的结果
+        # Test: apply train-chosen params to test period
+        # Note: EMA/cummax needs warm-up, so compute from train_start, take only test-period results
         full_idx = qqq.index[train_start:test_end_idx]
         qpos_full, tpos_full = strategy_fn(qqq.loc[full_idx], best_p)
         qpos_test = qpos_full.loc[test_idx]
@@ -258,7 +258,7 @@ print(f"    Calmar median: {np.median(calmars):.3f}, IQR [{np.percentile(calmars
 # López de Prado 2018, Advances in Financial ML, Ch 7
 # ============================================================
 print(f"\n[4/6] Combinatorial Purged Cross-Validation (CPCV)")
-print(f"  N=10 splits, k=2 test groups → C(10,2) = 45 backtest paths")
+print(f"  N=10 splits, k=2 test groups -> C(10,2) = 45 backtest paths")
 print(f"  Per López de Prado 2018, addresses overlap between train/test in serial data")
 print()
 

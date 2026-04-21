@@ -1,10 +1,10 @@
 """
-合规版全自适应 WF (无 look-ahead)
-原则:
-1. 固定窗口长度 5y/2y (不做扫描选择)
-2. 金字塔参数走 walk-forward 自适应
-3. 事件驱动重训用 VIX/drawdown 作为实时可观测信号
-4. 报告 ALL 主要变体 (不只 cherry-pick 最优)
+Compliant fully-adaptive WF (no look-ahead)
+Principles:
+1. Fixed window lengths 5y/2y (no scan-based selection)
+2. Pyramid parameters are walk-forward adaptive
+3. Event-driven retraining uses VIX/drawdown as real-time observable signals
+4. Report ALL major variants (not just cherry-picked best)
 """
 import yfinance as yf
 import pandas as pd
@@ -14,7 +14,7 @@ START = "1999-03-10"
 END = "2026-04-18"
 INIT_CASH = 10_000.0
 
-print("[1/5] 数据准备 ...")
+print("[1/5] Data preparation ...")
 qqq = yf.download("QQQ", start=START, end=END, auto_adjust=True, progress=False)["Close"].squeeze()
 tqqq_real = yf.download("TQQQ", start="2010-02-11", end=END, auto_adjust=True, progress=False)["Close"].squeeze()
 vix = yf.download("^VIX", start=START, end=END, auto_adjust=True, progress=False)["Close"].squeeze()
@@ -43,7 +43,7 @@ def build_synth(qqq_close, tqqq_real):
 
 tqqq_full = build_synth(qqq, tqqq_real)
 vix_a = vix.reindex(qqq.index).ffill()
-print(f"  数据: {qqq.index[0].date()} ~ {qqq.index[-1].date()}, {len(qqq)} 天")
+print(f"  Data: {qqq.index[0].date()} ~ {qqq.index[-1].date()}, {len(qqq)} days")
 
 # ============================================================
 def get_bull(qqq, fast, slow):
@@ -96,7 +96,7 @@ def metrics(eq, ret):
     return cagr, mdd, sh, cal, eq.iloc[-1], so
 
 # ============================================================
-# 全自适应 WF (固定窗口 5y/2y, 内部所有参数 WF 选)
+# Fully adaptive WF (fixed 5y/2y window, all inner parameters WF-selected)
 # ============================================================
 SEARCH_GRID = {
     'fast_slow': [(5,100),(5,150),(5,200),(8,150),(8,200),(10,200),(13,200)],
@@ -108,7 +108,7 @@ SEARCH_GRID = {
         [(-0.05,0.50),(-0.20,1.00)],
     ],
 }
-# 总组合: 7 × 2 × 2 × 3 = 84 / 训练窗口
+# Total combinations: 7 * 2 * 2 * 3 = 84 per training window
 
 def fully_adaptive_wf(qqq, tqqq_full, train_y=5, test_y=2, search_grid=SEARCH_GRID):
     all_returns = []
@@ -149,7 +149,7 @@ def fully_adaptive_wf(qqq, tqqq_full, train_y=5, test_y=2, search_grid=SEARCH_GR
     return full_eq, full_ret, chosen, test_periods
 
 # ============================================================
-# 事件驱动 WF (VIX/drawdown 触发重训)
+# Event-driven WF (VIX/drawdown triggers retraining)
 # ============================================================
 def event_driven_wf(qqq, tqqq_full, vix_a, train_y=5, max_test_y=5,
                      min_test_d=126, vix_thresh=35, dd_thresh=-0.20,
@@ -162,7 +162,7 @@ def event_driven_wf(qqq, tqqq_full, vix_a, train_y=5, max_test_y=5,
         train_start = max(0, current - 252*train_y)
         train_idx = qqq.index[train_start:current]
 
-        # 训练
+        # Train
         best_cal = -999; best_p = None
         for (f, s) in search_grid['fast_slow']:
             for base in search_grid['base_tqqq']:
@@ -176,14 +176,14 @@ def event_driven_wf(qqq, tqqq_full, vix_a, train_y=5, max_test_y=5,
                             best_cal = cal
                             best_p = (f, s, base, anchor, levels)
 
-        # 找下个重训点 (事件触发或最长 max_test_y 到期)
+        # Find next retrain point (event-triggered or max_test_y reached)
         max_end = min(current + 252*max_test_y, len(qqq))
         retrain = max_end
         eq_running = 1.0
         peak_running = 1.0
         for j in range(current + min_test_d, max_end):
             v = vix_a.iloc[j]
-            # 简化的回撤代理 (这里用 QQQ 价格代理, 真实应该用账户净值)
+            # Simplified drawdown proxy (using QQQ price here, should use account equity in practice)
             test_slice = qqq.iloc[current:j+1]
             mdd_so_far = (test_slice / test_slice.cummax() - 1).min()
             if (not pd.isna(v) and v > vix_thresh) or mdd_so_far < dd_thresh:
@@ -207,40 +207,40 @@ def event_driven_wf(qqq, tqqq_full, vix_a, train_y=5, max_test_y=5,
     return full_eq, full_ret, chosen, test_periods
 
 # ============================================================
-# 实验 1: 固定 5y/2y 全自适应 WF
+# Experiment 1: fixed 5y/2y fully adaptive WF
 # ============================================================
 print()
 print("=" * 100)
-print("【实验 1】固定 5y/2y 全自适应 WF (84 参数组合搜索)")
+print("[Experiment 1] Fixed 5y/2y fully adaptive WF (84-parameter combination search)")
 print("=" * 100)
-print("\n搜索空间 (固定，不做事后选择):")
-print("  fast×slow: 7 组合 (5/100, 5/150, 5/200, 8/150, 8/200, 10/200, 13/200)")
+print("\nSearch space (fixed, no post-hoc selection):")
+print("  fast x slow: 7 combinations (5/100, 5/150, 5/200, 8/150, 8/200, 10/200, 13/200)")
 print("  base_tqqq: [0%, 50%]")
 print("  anchor: [MA, Peak]")
-print("  levels: 3 种金字塔 (标准/激进/极简)")
-print("  → 84 组合 / 训练窗口")
-print("\n运行中 ...")
+print("  levels: 3 pyramids (standard/aggressive/minimal)")
+print("  -> 84 combinations per training window")
+print("\nRunning ...")
 
 eq_full, ret_full, params_full, periods_full = fully_adaptive_wf(qqq, tqqq_full, 5, 2)
 c, m, sh, ca, fv, so = metrics(eq_full, ret_full)
-print(f"\n📊 结果:")
+print(f"\nResults:")
 print(f"  CAGR {c*100:.2f}%, MDD {m*100:.2f}%, Sharpe {sh:.3f}, Sortino {so:.3f}, Calmar {ca:.3f}")
-print(f"  $10K → ${fv:,.0f}, $150K → ${fv*15:,.0f}")
+print(f"  $10K -> ${fv:,.0f}, $150K -> ${fv*15:,.0f}")
 
-print("\n各窗口选出的参数（看是否真的自适应）:")
+print("\nParameters chosen per window (checking whether it is really adaptive):")
 for i, ((sd, ed), p) in enumerate(zip(periods_full, params_full)):
     f, s, base, anchor, levels = p
-    levels_str = "/".join([f"{int(t*100)}→{int(fr*100)}%" for t, fr in levels])
+    levels_str = "/".join([f"{int(t*100)}->{int(fr*100)}%" for t, fr in levels])
     print(f"  #{i+1} {sd.date()}~{ed.date()}: f={f},s={s},base={int(base*100)}%,anchor={anchor},lvl={levels_str}")
 
 # ============================================================
-# 实验 2: 不同窗口长度的全自适应 (报告全部, 不cherry-pick)
+# Experiment 2: fully adaptive WF with different window lengths (report all, no cherry-pick)
 # ============================================================
 print()
 print("=" * 100)
-print("【实验 2】不同窗口长度对比 (全部展示, 不选最佳)")
+print("[Experiment 2] Comparison across window lengths (show all, do not select best)")
 print("=" * 100)
-print("注意: 这些数字仅供参考, 选哪个窗口要靠先验, 不能事后选")
+print("Note: these numbers are for reference only; choice of window must come from prior, not post-hoc")
 
 window_results = {}
 for tr in [3, 5, 7]:
@@ -250,22 +250,22 @@ for tr in [3, 5, 7]:
         c, m, sh, ca, fv, so = metrics(eq, ret)
         window_results[(tr, te)] = (c, m, sh, ca, fv, so)
 
-print(f"\n{'Train×Test':<14} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Sortino':>9} {'Calmar':>8} {'终值':>14}")
+print(f"\n{'Train x Test':<14} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Sortino':>9} {'Calmar':>8} {'Final Value':>14}")
 print("-" * 100)
 for (tr, te), (c, m, sh, ca, fv, so) in window_results.items():
-    print(f"{tr}y × {te}y       {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {so:>9.3f} {ca:>8.3f} {fv:>14,.0f}")
+    print(f"{tr}y x {te}y       {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {so:>9.3f} {ca:>8.3f} {fv:>14,.0f}")
 
 # ============================================================
-# 实验 3: 事件驱动 WF (实时可观测, 无 look-ahead)
+# Experiment 3: event-driven WF (real-time observable, no look-ahead)
 # ============================================================
 print()
 print("=" * 100)
-print("【实验 3】事件驱动 WF (VIX/回撤 实时触发)")
+print("[Experiment 3] Event-driven WF (VIX/drawdown real-time trigger)")
 print("=" * 100)
-print("规则: VIX > 阈值 或 累计回撤 < 阈值 时立即重训")
-print("两者都是 t 时刻可观测信号, 无 look-ahead")
+print("Rule: retrain immediately when VIX > threshold or cumulative drawdown < threshold")
+print("Both are observable signals at time t, no look-ahead")
 
-print(f"\n{'VIX阈值':<10} {'DD阈值':<10} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Calmar':>8} {'重训次数':>10}")
+print(f"\n{'VIX thresh':<10} {'DD thresh':<10} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Calmar':>8} {'# Retrains':>10}")
 print("-" * 90)
 event_results = {}
 for vt in [25, 30, 35, 40]:
@@ -276,32 +276,32 @@ for vt in [25, 30, 35, 40]:
         print(f"VIX>{vt:<6} DD<{int(dt*100):>3}% {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {len(pers):>10}")
 
 # ============================================================
-# 实验 4: 严格 OOS 1999-2010 测试
+# Experiment 4: strict OOS 1999-2010 test
 # ============================================================
 print()
 print("=" * 100)
-print("【实验 4】严格 OOS 1999-2010 测试 (全自适应在崩盘期的真实表现)")
+print("[Experiment 4] Strict OOS 1999-2010 test (real fully adaptive performance during crashes)")
 print("=" * 100)
-print("用 1999-2010 数据独立跑, 看自适应能否生存 dot-com + 2008")
+print("Run fully adaptive independently on 1999-2010 data, see whether it survives dot-com + 2008")
 
 oos_qqq = qqq.loc[:"2010-02-10"]
 oos_tqqq = tqqq_full.loc[:"2010-02-10"]
 if len(oos_qqq) > 252 * 7:
     oos_eq, oos_ret, _, _ = fully_adaptive_wf(oos_qqq, oos_tqqq, 5, 2)
     c, m, sh, ca, fv, so = metrics(oos_eq, oos_ret)
-    print(f"\n  OOS 1999-2010 全自适应 WF:")
+    print(f"\n  OOS 1999-2010 fully adaptive WF:")
     print(f"    CAGR {c*100:.2f}%, MDD {m*100:.2f}%, Sharpe {sh:.3f}, Calmar {ca:.3f}")
-    print(f"    $150K → ${fv*15:,.0f}")
+    print(f"    $150K -> ${fv*15:,.0f}")
 
 # ============================================================
-# 实验 5: 最终对比 (诚实标注每个的 look-ahead 风险)
+# Experiment 5: final comparison (honestly labeling each method's look-ahead risk)
 # ============================================================
 print()
 print("=" * 100)
-print("【最终对比】所有方法 + 诚实标注 look-ahead 风险")
+print("[Final comparison] All methods + honest look-ahead risk annotation")
 print("=" * 100)
 
-# 重跑基准 WF QQQ/TQQQ rotation
+# Rerun baseline WF QQQ/TQQQ rotation
 def wf_qqq_tqqq(qqq, tqqq_full, train_y=5, test_y=2):
     fast_grid = [3, 5, 8, 10, 13]; slow_grid = [50, 100, 150, 200, 250]
     all_returns = []
@@ -343,36 +343,36 @@ def wf_qqq_tqqq(qqq, tqqq_full, train_y=5, test_y=2):
 
 base_eq, base_ret = wf_qqq_tqqq(qqq, tqqq_full)
 
-print(f"\n{'方法':<46} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Calmar':>8} {'终值':>14}")
+print(f"\n{'Method':<46} {'CAGR':>8} {'MDD':>9} {'Sharpe':>8} {'Calmar':>8} {'Final Value':>14}")
 print("-" * 110)
 
-# 全自适应固定窗口
+# Fully adaptive fixed window
 c, m, sh, ca, fv, so = metrics(eq_full, ret_full)
-print(f"{'全自适应 WF (5y/2y, 84 组合)':<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
+print(f"{'Fully adaptive WF (5y/2y, 84 combos)':<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
 
-# 基准 WF QQQ/TQQQ
+# Baseline WF QQQ/TQQQ
 c, m, sh, ca, fv, so = metrics(base_eq, base_ret)
 print(f"{'WF QQQ/TQQQ rotation (5y/2y)':<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
 
-# 中位事件驱动
+# Middle event-driven
 mid_event_key = (35, -0.20)
 c, m, sh, ca, fv, so, np_e = event_results[mid_event_key]
-print(f"{'事件驱动 WF (VIX>35, DD<-20%)':<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
+print(f"{'Event-driven WF (VIX>35, DD<-20%)':<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
 
-# B&H 同期
+# B&H same period
 test_period = base_ret.index
-for name, px in [("TQQQ B&H 同期", tqqq_full.loc[test_period]), ("QQQ B&H 同期", qqq.loc[test_period])]:
+for name, px in [("TQQQ B&H same period", tqqq_full.loc[test_period]), ("QQQ B&H same period", qqq.loc[test_period])]:
     eq = (px / px.iloc[0]) * INIT_CASH
     ret = eq.pct_change().fillna(0)
     c, m, sh, ca, fv, so = metrics(eq, ret)
     print(f"{name:<46} {c*100:>7.2f}% {m*100:>8.2f}% {sh:>8.3f} {ca:>8.3f} {fv:>14,.0f}")
 
 print()
-print("【Look-ahead 风险评估表】")
+print("[Look-ahead risk assessment table]")
 print("-" * 110)
-print(f"{'方法':<46} {'WF 内部':<10} {'窗口选择':<10} {'变体选择':<10} {'网格选择':<10}")
+print(f"{'Method':<46} {'WF internal':<12} {'Window pick':<12} {'Variant pick':<13} {'Grid pick':<11}")
 print("-" * 110)
-print(f"{'全自适应 WF (5y/2y)':<46} {'✅ 干净':<10} {'✅ 固定':<10} {'✅ 内置':<10} {'⚠️ 先验':<10}")
-print(f"{'WF QQQ/TQQQ rotation':<46} {'✅ 干净':<10} {'⚠️ 5y/2y':<10} {'⚠️ 多变体':<10} {'⚠️ 先验':<10}")
-print(f"{'事件驱动 WF':<46} {'✅ 干净':<10} {'✅ 自适应':<10} {'✅ 内置':<10} {'⚠️ 先验':<10}")
-print(f"{'TQQQ/QQQ Buy & Hold':<46} {'✅ N/A':<10} {'✅ N/A':<10} {'✅ N/A':<10} {'✅ N/A':<10}")
+print(f"{'Fully adaptive WF (5y/2y)':<46} {'clean':<12} {'fixed':<12} {'embedded':<13} {'prior':<11}")
+print(f"{'WF QQQ/TQQQ rotation':<46} {'clean':<12} {'5y/2y':<12} {'multi':<13} {'prior':<11}")
+print(f"{'Event-driven WF':<46} {'clean':<12} {'adaptive':<12} {'embedded':<13} {'prior':<11}")
+print(f"{'TQQQ/QQQ Buy & Hold':<46} {'N/A':<12} {'N/A':<12} {'N/A':<13} {'N/A':<11}")
